@@ -1,0 +1,4 @@
+split,n,unfair,fair,unfair_pct,majority_baseline_acc
+train,5378,1013,4365,18.8,81.2
+validation,415,76,339,18.3,81.7
+test,1038,211,827,20.3,79.7

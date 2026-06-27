@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+
+# Data (datasets are pulled from Hugging Face or supplied via --local)
+data/
+*.parquet
+
+# Local model caches
+*.bin
+*.safetensors
+.cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
