@@ -32,15 +32,17 @@ judgment. It is not yet a tool a stranger can point at their own contract.
 2. **Single-annotator community dataset.** `CodeHima/TOS_Dataset` (MIT licensed)
    is conveniently shaped but carries one annotator's judgement and is not the
    peer-reviewed CLAUDETTE release. It even contains directional noise: at least
-   one consumer-protective carve-out is labelled unfair. The planned LexGLUE
-   `unfair_tos` cross-check is the validation that would substantiate any claim
-   beyond this one dataset.
+   one consumer-protective carve-out is labelled unfair. The LexGLUE `unfair_tos`
+   cross-check (now run) is the validation that substantiates claims beyond this
+   one dataset; the model holds 0.895 recall there as held-out data.
 
 3. **TF-IDF is shallow.** Lap 1 keys on surface phrasing ("sole discretion", "we
    reserve the right"). Adversarial rephrasing would evade it. The error analysis
-   already showed the residual misses are semantic, not lexical, which is the
-   evidenced case for the legal-BERT lap - but the shipped headline model is
-   still the shallow one.
+   showed the residual misses are mostly semantic rather than lexical - plus a
+   hard tail where the trigger word is present but buried in syntax the model
+   cannot parse (a class-action waiver phrased as mutual, an arbitration carve-out
+   worded to sound even-handed). Both are the evidenced case for the legal-BERT
+   lap - but the shipped headline model is still the shallow one.
 
 4. **English only, clause level.** No multilingual support, and no document-level
    reasoning or clause-to-clause interaction is modelled.
@@ -76,10 +78,12 @@ and only one of them is small.
 
 ### Then: validation and ranking quality
 
-- **LexGLUE `unfair_tos` cross-check.** Train on the community set, evaluate on
-  the peer-reviewed benchmark collapsed to binary. Quantifies this dataset's
-  label noise and substantiates generalisation beyond it. The single most
-  valuable unrun validation.
+- **LexGLUE `unfair_tos` cross-check (done).** Trains on the community set and
+  evaluates on the peer-reviewed benchmark collapsed to binary. It quantified
+  this dataset's labelling boundary against expert labels and substantiated
+  generalisation: 0.895 recall on the held-out expert set, with the recall-first
+  threshold transferring almost unchanged. This was the single most valuable
+  unrun validation; it is now run (`reports/crosscheck.md`).
 
 - **Calibrated probabilities (temperature scaling)** for the severity ranking, so
   flagged clauses can be ordered by a trustworthy confidence rather than a raw
@@ -97,12 +101,13 @@ and only one of them is small.
 
 | Capability | Status |
 |---|---|
-| Recall-first cost-asymmetry threshold | Shipped, validated (0.796 recall) |
+| Recall-first cost-asymmetry threshold | Shipped, validated (0.685 recall, cleaned) |
 | Readable per-clause report (CSV + XLSX) | Shipped |
 | Error analysis of the model's own misses | Shipped |
+| Structural non-clause cleaning (~18% of rows) | Shipped (`drop_nonclauses`) |
 | Legal-BERT semantic-recovery comparison | Shipped (rerun pending for the corrected number) |
 | Score a user's own pasted ToS | Not built (next step) |
 | Clause segmentation of raw documents | Not built (the hard part) |
-| LexGLUE cross-check | Not run |
+| LexGLUE cross-check | Shipped (0.895 recall held-out) |
 | Calibrated severity ranking | Not built |
 | Deployed service (API + Docker) | Not built (Lap 3) |

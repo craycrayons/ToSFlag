@@ -1,0 +1,3 @@
+operating_point,threshold,recall,precision,f1,flagged
+community_threshold,0.518,0.895,0.497,0.639,0.193
+lexglue_tuned,0.537,0.884,0.514,0.65,0.184

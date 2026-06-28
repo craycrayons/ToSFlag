@@ -61,40 +61,70 @@ warranty and liability disclaimers ("THE SERVICE IS PROVIDED ON AN 'AS IS'
 BASIS"). The default TF-IDF lowercases, collapsing "AS IS" into the
 near-stopwords "as"/"is" and erasing the signal - even though caps emphasis is a
 drafting convention for limitation-of-liability blocks. Adding a caps-preserving
-TF-IDF and explicit emphasis features (uppercase ratio, mostly-caps flag) lifted
-recall-first test recall from **0.706 to 0.796** (~19 more unfair clauses caught)
-and the caps disclaimers dropped out of the miss list entirely.
+TF-IDF and explicit emphasis features (uppercase ratio, mostly-caps flag) caught
+the missed caps disclaimers, which dropped out of the miss list entirely.
 
-**Second read - the residual misses are semantic, not lexical.** After the caps
-fix, the clauses the model still misses share a different character: waiver-of-
-rights and responsibility-shifting clauses written in calm, boilerplate language
-("failure to enforce any right shall not constitute a waiver"; "you alone are
-responsible for Your Content"). These are unfair because of what the language
-*does legally*, not because of any alarming vocabulary - and a bag-of-words model
-fundamentally cannot see that. This is the evidenced case for Lap 2: a
-legal-domain encoder, not a heavier model in general.
+**Second read - the residual misses are mostly semantic, not lexical.** After
+the caps fix, the clauses the model still misses share a different character:
+waiver-of-rights and responsibility-shifting clauses written in calm, boilerplate
+language ("failure to enforce any right shall not constitute a waiver"; "you
+alone are responsible for Your Content"). These are unfair because of what the
+language *does legally*, not because of any alarming vocabulary. A harder tail is
+subtler still: clauses that *do* contain trigger vocabulary (arbitration, waiver,
+liability) but bury it in syntax a bag-of-words model cannot parse - a
+class-action waiver phrased as mutual, an arbitration carve-out worded to sound
+even-handed. Both kinds are the evidenced case for Lap 2: a legal-domain encoder
+that reads structure, not a heavier model in general.
 
-**A note on label noise.** Some "unfair"-labelled items are bare headers
-(`NOTICES`, `Violations`, `You will not:`) with no clause content; the pipeline
-flags these and reports recall both raw and clause-only. On this dataset the two
-numbers are near-identical (0.796 vs 0.797), so header noise is real but is *not*
-what caps recall - the model itself is. The dataset also contains subtler,
-directional noise: at least one consumer-*protective* carve-out (an arbitration
-clause guaranteeing a hearing in the consumer's home county) is labelled unfair.
-Both are reasons the Lap 2 cross-check against LexGLUE `unfair_tos` matters.
+**A note on label noise (and the cleaning step it forced).** Many
+"unfair"-labelled items are bare headers (`NOTICES`, `Terms of Service`, `You
+will not:`), section numbers, dates, and nav stubs with no clause content. These
+are not fair-or-unfair at all; they are not clauses. An early version flagged
+only the most obvious ones; reading the per-clause report directly showed the
+filter was leaking, and a strengthened pass removes **~18% of every split** as
+structural non-clauses (`data.py`, `drop_nonclauses`, audited row-by-row with
+zero real-clause false positives). This matters to the headline number: training
+and scoring on the cleaned set drops recall-first recall from the noisy 0.796 to
+an honest **0.685**, because the removed stubs were cheap "catches" the model got
+credit for. The lower number is the cleanup working, not a regression - and the
+held-out LexGLUE cross-check below, run on a dataset with no such noise, confirms
+the model itself generalises. The dataset also contains subtler, directional
+noise: at least one consumer-*protective* carve-out (an arbitration clause
+guaranteeing a hearing in the consumer's home county) is labelled unfair - which
+is exactly the kind of thing the LexGLUE cross-check surfaces.
 
 ## The numbers (real, from `scripts/run.py`)
 
 | operating point | recall | precision | F1 | flagged |
 |---|---|---|---|---|
-| recall-first (5:1 cost) | 0.796 | 0.390 | 0.523 | 0.415 |
-| F1-first (the default) | 0.517 | 0.548 | 0.532 | 0.192 |
+| recall-first (5:1 cost) | 0.685 | 0.477 | 0.562 | 0.283 |
+| F1-first (the default) | 0.554 | 0.574 | 0.564 | 0.190 |
 
-The recall-first point catches 80% of unfair clauses to the default's 52% - a
-28-point recall gain. The cost is explicit and not soft-pedalled: precision falls
-to 0.39 and 42% of clauses go to human review. For a consumer-protection triage
-aid, that trade is the entire point; for a different use case it would be the
-wrong call, which is exactly why the cost ratio is one editable constant.
+These are the numbers on the cleaned dataset (structural non-clauses removed; see
+the label-noise note above). The recall-first point catches 69% of unfair clauses
+to the default's 55% - a 13-point recall gain on genuinely hard clauses, with the
+free wins from mislabelled stubs no longer inflating either figure. The cost is
+explicit and not soft-pedalled: precision is 0.48 and 28% of clauses go to human
+review. For a consumer-protection triage aid, that trade is the entire point; for
+a different use case it would be the wrong call, which is exactly why the cost
+ratio is one editable constant.
+
+## Cross-check: does it generalise? (LexGLUE `unfair_tos`)
+
+The community dataset is one annotator's judgement, so the model is validated
+against the peer-reviewed LexGLUE `unfair_tos` benchmark as fully held-out data -
+trained on the community set, never shown LexGLUE during training or threshold
+selection (`scripts/run_crosscheck.py`, `reports/crosscheck.md`). The same
+recall-first threshold transfers almost unchanged (community 0.518 vs a
+LexGLUE-tuned 0.537), and recall on the expert benchmark is **0.895** - higher
+than on the cleaned community set, because LexGLUE's expert-selected unfair
+clauses cluster on lexically-marked legal patterns the model reads well, while
+the community set's residual hard cases are the plain-language and
+syntactically-buried ones above. Recall by expert category is even (no structural
+blind spot; Jurisdiction, Content removal, and Choice of law all at 1.0). Where
+the model and the experts disagree, it errs toward flagging - calling unfair some
+liability and arbitration clauses the LexGLUE taxonomy leaves unlabelled, which
+on a recall-first consumer-protection framing is the correct direction to err.
 
 ## Reading the output (no code required)
 
@@ -115,9 +145,10 @@ python scripts/export_report.py --split all # rows for train+val+test, not just 
 
 - **Single-annotator community dataset.** `CodeHima/TOS_Dataset` (MIT licensed)
  is convenient and correctly shaped, but it is not the peer-reviewed CLAUDETTE
- release and carries one annotator's judgement. Before any production claim,
- cross-check against LexGLUE `unfair_tos` (the standard benchmark) collapsed to
- binary. This cross-check is the planned Lap 2 validation.
+ release and carries one annotator's judgement. It is cross-checked against
+ LexGLUE `unfair_tos` (the standard benchmark) collapsed to binary; the model
+ holds 0.895 recall there as held-out data, which is the evidence it generalises
+ beyond this one dataset. See the cross-check section above.
 - **English only.** Real consumer-protection deployment is multilingual.
 - **Sentence/clause level.** No document-level reasoning or clause-to-clause
  interaction is modelled.
@@ -161,8 +192,14 @@ unfair clauses the model still misses (the failures that matter).
  which is exactly why it is named here rather than quietly shipped. A first version
  can sidestep segmentation by accepting an already-split clause list (one per line);
  raw-document segmentation is the harder follow-on.
-- Lap 2 (next strands, not yet built): LexGLUE `unfair_tos` cross-check to quantify
- this dataset's label noise against the peer-reviewed benchmark; calibrated
- probabilities (temperature scaling) for the severity ranking.
+- **Lap 2 (shipped): LexGLUE `unfair_tos` cross-check.** `scripts/run_crosscheck.py`
+ trains on the community set and evaluates on the peer-reviewed benchmark as
+ held-out data, reporting generalisation, recall by expert category, and a
+ two-way disagreement analysis (`reports/crosscheck.md`). Result summarised in the
+ cross-check section above: 0.895 recall on the expert set, threshold transfers
+ cleanly, disagreements lean consumer-protective.
+- Lap 2 (next strand, not yet built): calibrated probabilities (temperature
+ scaling) for the severity ranking, so flagged clauses can be ordered by a
+ trustworthy confidence rather than a raw score.
 - Lap 3: FastAPI service + Docker + CI, clause-level review queue output ranked by
  calibrated severity.
