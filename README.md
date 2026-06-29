@@ -36,7 +36,9 @@ how much recall.
  transformer. It runs on a CPU in seconds with no model download, so anyone who
  clones the repo reproduces the result. The contribution is the metric decision
  and the task framing, which a heavier encoder would not change. Lap 2 swaps in
- legal-bert behind the same interface *if* the numbers justify the cost.
+ legal-bert behind the same interface and reports what it does and does not buy
+ (it trades recall for precision and recovers ~a third of the semantic misses;
+ see below), rather than assuming a heavier model is an upgrade.
 - It is **not legal advice** and not a substitute for a lawyer. It is a triage
  aid: it surfaces clauses worth a human's attention, ranked by severity.
 
@@ -73,8 +75,9 @@ language *does legally*, not because of any alarming vocabulary. A harder tail i
 subtler still: clauses that *do* contain trigger vocabulary (arbitration, waiver,
 liability) but bury it in syntax a bag-of-words model cannot parse - a
 class-action waiver phrased as mutual, an arbitration carve-out worded to sound
-even-handed. Both kinds are the evidenced case for Lap 2: a legal-domain encoder
-that reads structure, not a heavier model in general.
+even-handed. Both kinds were the predicted case for Lap 2: a legal-domain
+encoder that reads structure, not a heavier model in general. (Lap 2 ran, and
+partly bore this out - see the legal-BERT section below.)
 
 **A note on label noise (and the cleaning step it forced).** Many
 "unfair"-labelled items are bare headers (`NOTICES`, `Terms of Service`, `You
@@ -126,6 +129,34 @@ the model and the experts disagree, it errs toward flagging - calling unfair som
 liability and arbitration clauses the LexGLUE taxonomy leaves unlabelled, which
 on a recall-first consumer-protection framing is the correct direction to err.
 
+## Lap 2: does a legal encoder close the semantic gap? (partly)
+
+Lap 1's error analysis predicted the residual misses were semantic, so a
+legal-domain encoder should recover them. Lap 2 tests that directly: legal-BERT
+(`nlpaueb/legal-bert-base-uncased`) fine-tuned behind the *same* operating-point
+and metric code, so the comparison is apples-to-apples (`scripts/run_lap2.py`,
+`reports/lap2_recovery.md`). The result is more interesting than a clean win:
+
+| model | recall | precision | F1 | flagged |
+|---|---|---|---|---|
+| TF-IDF (Lap 1) | 0.685 | 0.477 | 0.562 | 0.283 |
+| legal-BERT (Lap 2) | 0.667 | 0.599 | 0.631 | 0.219 |
+
+Legal-BERT recovers **17 of the 53 clauses TF-IDF missed (32%)** - so the
+semantic diagnosis was partly right; those clauses really were readable by a
+model that encodes legal language. But its overall recall is slightly *lower*,
+which means it did not add semantic coverage on top of lexical coverage - it
+**traded** one for the other, catching a different slice while dropping some
+clauses TF-IDF caught. It buys real precision (0.48 -> 0.60) for that trade. And
+~36 of the 53 misses are missed by *both* models - including blatant ones like an
+ALL-CAPS "ALL SALES ARE FINAL... no refund" clause - so the residual ceiling is
+not "semantic vs surface" at all. Those resist both because they need
+clause-level *context* (a venue clause is only unfair relative to where the
+consumer lives) or because the label itself is contestable. The honest takeaway:
+a heavier model relocates the ceiling rather than breaking it, and the two models
+are **complementary** - an ensemble that flags if either fires is the
+recall-first follow-on the data points to, not a third model.
+
 ## Reading the output (no code required)
 
 `scripts/export_report.py` writes a plain per-clause report any reviewer can open
@@ -175,10 +206,10 @@ unfair clauses the model still misses (the failures that matter).
  fine-tunes (or linear-probes) `nlpaueb/legal-bert-base-uncased` and reuses Lap 1's
  exact operating-point and metric code, so the comparison is apples-to-apples. The
  decisive output is `reports/lap2_recovery.md`: of the unfair clauses TF-IDF missed,
- how many the legal encoder recovers - the direct test of the Lap 1 hypothesis that
- those misses were semantic. The recovery count is reported over real clauses only
- (header/stub label noise excluded, matching `run.py`'s recall discipline). Probe
- mode runs on CPU; `--finetune` is the GPU ceiling.
+ how many the legal encoder recovers. Result (see the Lap 2 section above): it
+ recovers 32% of the real misses but trades recall for precision rather than
+ strictly improving, and a hard residual resists both models - so the two are
+ complementary, not ranked. Probe mode runs on CPU; `--finetune` is the GPU run.
 - **Bring-your-own-ToS inference (the gap between artifact and tool).** Today the
  repo trains on a labelled dataset and reports on that dataset's own held-out test
  split. The model can score arbitrary text, but nothing wired up lets a user feed in

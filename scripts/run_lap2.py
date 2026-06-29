@@ -102,13 +102,18 @@ def main() -> None:
     n_stub_missed = n_missed_raw - n_missed
     print(
         f"\nSemantic-miss recovery (the Lap 1 hypothesis test):"
-        f"\n  TF-IDF missed {n_missed_raw} 'unfair' items; {n_stub_missed} are non-clause "
-        f"stubs (label noise), leaving {n_missed} real clauses missed."
-        f"\n  legal-bert recovers {n_rec} of {n_missed} real clauses "
-        f"({100*n_rec/max(n_missed,1):.0f}%)  <- the honest semantic-recovery number."
-        f"\n  (raw, stub-inclusive: {n_rec_raw}/{n_missed_raw} = "
-        f"{100*n_rec_raw/max(n_missed_raw,1):.0f}%, inflated by stub flags.)"
+        f"\n  TF-IDF missed {n_missed} real unfair clauses at its recall-first point."
+        f"\n  legal-bert recovers {n_rec} of {n_missed} "
+        f"({100*n_rec/max(n_missed,1):.0f}%)."
     )
+    # Only mention stubs if any are actually present (i.e. the frame was loaded
+    # with drop_junk=False). With the default cleaned loader this is 0 and the
+    # note is suppressed, since raw and clean numbers are then identical.
+    if n_stub_missed > 0:
+        print(
+            f"  ({n_stub_missed} non-clause stubs were excluded as label noise; "
+            f"raw stub-inclusive figure: {int(recovered_raw.sum())}/{n_missed_raw}.)"
+        )
 
     # Write the recovered clauses so the qualitative claim is inspectable.
     rec_df = test[recovered][["text", "unfairness_level"]].copy()
@@ -131,12 +136,13 @@ def _row(name, threshold, m):
 def _write_recovery_md(test, recovered, still_missed, n_missed, n_rec):
     lines = [
         "# Lap 2: did legal-bert close the semantic gap?\n",
-        f"Lap 1's TF-IDF model missed {n_missed} **real** unfair clauses at its "
-        f"recall-first operating point (non-clause header stubs are excluded as "
-        f"dataset label noise, matching `run.py`'s recall discipline). The Lap 1 "
-        f"error analysis argued these residual misses were SEMANTIC - waiver/"
-        f"responsibility clauses unfair by legal meaning, not vocabulary. If that "
-        f"diagnosis was right, a legal-domain encoder should recover them.\n",
+        f"Lap 1's TF-IDF model missed {n_missed} real unfair clauses at its "
+        f"recall-first operating point (the dataset's non-clause header stubs are "
+        f"already removed upstream by `data.py`'s cleaning, so every item here is "
+        f"a real clause). The Lap 1 error analysis argued these residual misses "
+        f"were SEMANTIC - waiver/responsibility clauses unfair by legal meaning, "
+        f"not vocabulary. If that diagnosis was right, a legal-domain encoder "
+        f"should recover them.\n",
         f"**Result: legal-bert recovers {n_rec} of {n_missed} real missed clauses "
         f"({100*n_rec/max(n_missed,1):.0f}%).**\n",
         "## Clauses recovered (TF-IDF missed, legal-bert caught)\n",

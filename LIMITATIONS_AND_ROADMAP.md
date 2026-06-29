@@ -38,11 +38,14 @@ judgment. It is not yet a tool a stranger can point at their own contract.
 
 3. **TF-IDF is shallow.** Lap 1 keys on surface phrasing ("sole discretion", "we
    reserve the right"). Adversarial rephrasing would evade it. The error analysis
-   showed the residual misses are mostly semantic rather than lexical - plus a
-   hard tail where the trigger word is present but buried in syntax the model
-   cannot parse (a class-action waiver phrased as mutual, an arbitration carve-out
-   worded to sound even-handed). Both are the evidenced case for the legal-BERT
-   lap - but the shipped headline model is still the shallow one.
+   predicted the residual misses were mostly semantic - plus a hard tail where the
+   trigger word is present but buried in syntax the model cannot parse (a
+   class-action waiver phrased as mutual, an arbitration carve-out worded to sound
+   even-handed). Lap 2 tested this: legal-BERT recovers ~a third of those misses
+   (confirming part of the diagnosis) but trades recall for precision rather than
+   strictly improving, and a hard residual resists both models - so the ceiling is
+   clause-level context and label consistency, not model depth. The shipped
+   headline model is still the shallow one, by choice (CPU, reproducible).
 
 4. **English only, clause level.** No multilingual support, and no document-level
    reasoning or clause-to-clause interaction is modelled.
@@ -105,7 +108,7 @@ and only one of them is small.
 | Readable per-clause report (CSV + XLSX) | Shipped |
 | Error analysis of the model's own misses | Shipped |
 | Structural non-clause cleaning (~18% of rows) | Shipped (`drop_nonclauses`) |
-| Legal-BERT semantic-recovery comparison | Shipped (rerun pending for the corrected number) |
+| Legal-BERT semantic-recovery comparison | Shipped (32% recovery; trades recall for precision) |
 | Score a user's own pasted ToS | Not built (next step) |
 | Clause segmentation of raw documents | Not built (the hard part) |
 | LexGLUE cross-check | Shipped (0.895 recall held-out) |
