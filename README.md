@@ -11,13 +11,49 @@ review (false positive) costs a few seconds of a human skim. ToSFlag chooses its
 operating point from that asymmetry, and reports honestly what it gives up to
 do so.
 
+## Built for triage, not verdicts
+
+ToSFlag does a wide, cheap, reproducible first pass: it scores thousands of
+clauses in milliseconds on a CPU, for free, deterministically, at a committed
+operating point you can inspect and argue with. That is a different job from
+rendering a verdict on a single clause. For one clause, a frontier LLM will
+often judge it better than this model does - and that is fine, because judging
+one clause well is not the job. The job is surfacing the clauses worth a human's
+attention across a whole document, or across many documents, at a fixed and
+auditable false-negative rate - which is precisely what a non-deterministic,
+per-call-priced, un-tunable LLM is the wrong instrument for. The two are not
+rivals but stages: a cheap classifier for breadth, an LLM for depth on the small
+subset the classifier surfaces. That composition is developed in full below
+("The classifier and the LLM are stages, not rivals").
+
+The contribution, then, is not accuracy. It is the judgment about *what to
+optimise* in a domain where "correct" is contested - which the rest of this
+README makes concrete.
+
 ## Why accuracy is the wrong metric here
 
-The dataset is ~80% fair clauses. A model that predicts "fair" for every clause
-scores ~80% accuracy and catches zero unfair clauses - it is useless and looks
-respectable. That single fact is why this project does not report accuracy as a
-headline number. (Run `scripts/run.py`; the `majority_baseline_acc` column in
-the distribution table makes this concrete - it prints ~80 for every split.)
+Start with the shape of the data. In this dataset only about one clause in five
+is unfair; the other ~80% are fair. That imbalance is what makes accuracy
+misleading, because accuracy just counts how many clauses the model labels
+correctly, and on lopsided data that count is easy to inflate without doing
+anything useful.
+
+Concretely: a model that ignores the text and labels *every* clause "fair" is
+correct on all the fair clauses and wrong only on the unfair ones - so it scores
+~80% accuracy while catching zero unfair clauses. It has done no real work, yet
+the number looks respectable. Accuracy rewards it for agreeing with the majority
+class and hides the fact that it fails completely at the only task that matters:
+finding the unfair clauses. (This isn't hypothetical - run `scripts/run.py` and
+the `majority_baseline_acc` column prints ~80 for every split, the do-nothing
+model's score sitting in your own output.)
+
+So the headline metric cannot be accuracy. And it cannot simply be "recall"
+either, because you can trivially get perfect recall by flagging *everything* -
+useless in the other direction. What is actually needed is a way to weigh the
+two kinds of error against each other, since they are not equally costly: missing
+an unfair clause harms a consumer, while over-flagging a fair one costs a few
+seconds of review. That asymmetry - not accuracy, not raw recall - is what the
+operating point is chosen from, and the next section makes it concrete.
 
 ## The thesis, made operational
 
@@ -41,6 +77,34 @@ how much recall.
  see below), rather than assuming a heavier model is an upgrade.
 - It is **not legal advice** and not a substitute for a lawyer. It is a triage
  aid: it surfaces clauses worth a human's attention, ranked by severity.
+
+## Score your own clauses
+
+The repo ships a frozen model so you can score clauses it has never seen, with
+no training and no network. `scripts/train_and_save.py` fits the Lap-1 pipeline
+on the cleaned data, derives the committed recall-first threshold on validation
+(the same derivation `run.py` uses, so its provenance is real, not a hardcoded
+constant), and writes both to `models/` as one unit - the model and the exact
+operating point it was chosen at travel together and cannot drift apart. That
+frozen model is committed to the repo (~1 MB), so inference needs neither
+Hugging Face nor a GPU.
+
+```bash
+# one time (or after any retrain): freeze model + operating point
+python scripts/train_and_save.py
+
+# score your own clauses - one clause per line
+python scripts/infer.py my_clauses.txt
+cat my_clauses.txt | python scripts/infer.py          # or piped
+```
+
+Input is **one clause per line** (already segmented - see the limitation on
+segmentation below). Output is `reports/byo_report.csv` (complete, opens
+anywhere) and a colour-coded `reports/byo_report.xlsx` (rows shaded by risk
+band, worst first). The report drops the ground-truth columns - `true_label`,
+`outcome`, `severity` - because unseen text has no answer key; what remains is
+what the model actually produces: `clause`, `flagged`, `risk_score`,
+`why_flagged`. This is the *breadth* stage of the two-stage design below.
 
 ## Task framing (where this differs from neighbours)
 
@@ -157,6 +221,37 @@ a heavier model relocates the ceiling rather than breaking it, and the two model
 are **complementary** - an ensemble that flags if either fires is the
 recall-first follow-on the data points to, not a third model.
 
+## The classifier and the LLM are stages, not rivals
+
+The obvious question about any classifier in 2026 is "why not just ask an LLM?"
+The honest answer is that for judging *one clause*, you often should - and the
+project is stronger for saying so. The classifier's value is not depth on a
+single clause; it is breadth, cost, and reproducibility across many. The two
+belong in the same system, at different stages:
+
+- **Stage 1 - the classifier (this repo).** Recall-first, deterministic, free,
+  runs anywhere with no network. It takes *all* clauses and does the wide first
+  pass, catching most unfair clauses at a committed, auditable operating point.
+- **Stage 2 - an LLM judge (the follow-on).** Depth and explanation, applied
+  *only* to the small subset Stage 1 surfaces - including the cases a bag-of-
+  words model structurally cannot see (unfairness by accumulated scope, e.g. a
+  "perpetual, irrevocable, worldwide, royalty-free" licence whose individual
+  words are all neutral). Because it runs on a shortlist, not every clause, its
+  per-call cost stays bounded.
+
+The clauses worth an LLM look are the ones where the classifier is *weak*: (a)
+the **uncertain band** near the
+threshold (in testing, an arbitration clause scored 0.404 against a 0.456
+cut-off - it nearly flipped), and (b) **confident blind spots** - low score but
+genuinely dangerous (the scope-pileup licence above scored 0.042). No single
+rule catches both, so the principled move is to route the *union* of two cheap
+signals (score-near-threshold, plus a length/complexity flag or a Lap-1-vs-Lap-2
+disagreement) to Stage 2, and keep an agreement column so a human can sort by
+the cases where the two stages disagreed - the highest-value review queue.
+
+The sharpest version does not *guess* that band: bin a labelled holdout by score,
+measure where the classifier is actually worst, and route by the measurement.
+
 ## Reading the output (no code required)
 
 `scripts/export_report.py` writes a plain per-clause report any reviewer can open
@@ -210,19 +305,24 @@ unfair clauses the model still misses (the failures that matter).
  recovers 32% of the real misses but trades recall for precision rather than
  strictly improving, and a hard residual resists both models - so the two are
  complementary, not ranked. Probe mode runs on CPU; `--finetune` is the GPU run.
-- **Bring-your-own-ToS inference (the gap between artifact and tool).** Today the
- repo trains on a labelled dataset and reports on that dataset's own held-out test
- split. The model can score arbitrary text, but nothing wired up lets a user feed in
- their own Terms of Service and get a report back. Closing this is two pieces of
- work, only one of them small. The small piece is the inference path: load a cached
- trained model, run the existing pipeline on new text, write the same clause report
- minus the ground-truth columns. The hard piece is clause segmentation: the dataset
- hands clauses pre-split, one per row, but a real ToS is a wall of text, and naive
- splitting breaks on "Inc.", "e.g.", section numbers, and nested sub-clauses. The
- segmentation quality bounds the whole tool's usefulness more than the model does -
- which is exactly why it is named here rather than quietly shipped. A first version
- can sidestep segmentation by accepting an already-split clause list (one per line);
- raw-document segmentation is the harder follow-on.
+- **Bring-your-own-ToS inference (small piece shipped; segmentation still open).**
+ The inference path is now built: `scripts/train_and_save.py` freezes the model +
+ operating point and `scripts/infer.py` scores an already-split clause list (one
+ per line), writing the same report minus the ground-truth columns. See "Score
+ your own clauses" above. What remains is the *hard* piece - clause segmentation:
+ the dataset hands clauses pre-split, one per row, but a real ToS is a wall of
+ text, and naive splitting breaks on "Inc.", "e.g.", section numbers, and nested
+ sub-clauses. The segmentation quality bounds the whole tool's usefulness more
+ than the model does - which is exactly why it is named here rather than quietly
+ shipped. Accepting a pre-split list buys ~80% of the utility; raw-document
+ segmentation is the follow-on.
+- **Two-stage classifier + LLM (next architecture lap).** The shipped inference
+ path is the *breadth* stage. The follow-on adds an LLM *depth* stage on the
+ subset the classifier surfaces - routed by where the cheap model is weakest
+ (uncertain band + confident blind spots), not by the extremes, with an
+ agreement column for human review. Design developed in "The classifier and the
+ LLM are stages, not rivals" above. This is the recall-first follow-on that also
+ catches the cumulative-scope cases a bag-of-words model structurally misses.
 - **Lap 2 (shipped): LexGLUE `unfair_tos` cross-check.** `scripts/run_crosscheck.py`
  trains on the community set and evaluates on the peer-reviewed benchmark as
  held-out data, reporting generalisation, recall by expert category, and a

@@ -15,19 +15,22 @@ or F1. It ships with a readable per-clause report, an error analysis of its own
 misses, and an apples-to-apples Lap 2 comparison against a legal-domain encoder.
 
 It is a validated scoring engine and a portfolio-grade demonstration of metric
-judgment. It is not yet a tool a stranger can point at their own contract.
+judgment. It now scores a user's own pre-split clauses; it cannot yet take a raw
+contract as a wall of text, because clause segmentation is unbuilt (see roadmap).
 
 ---
 
 ## Honest limitations (the present situation)
 
-1. **It runs on one dataset, not on arbitrary text.** The repo trains on
-   `CodeHima/TOS_Dataset` and reports on that dataset's own held-out test split.
-   Every clause in the output was already in the dataset and already labelled.
-   There is no path today for a user to feed in their own ToS and get a report.
-   The model can score new text; nothing wired up exposes that to a user. This
-   is the single biggest gap between "artifact" and "tool", and it is the
-   headline next step below.
+1. **Segmentation, not scoring, is now the gap to arbitrary text.** The
+   inference path is built: `scripts/infer.py` scores an already-split clause
+   list (one per line) with a frozen model, no training and no network, and
+   `scripts/train_and_save.py` freezes the model + operating point together. So
+   a user *can* now feed in their own clauses and get a report. What they cannot
+   yet do is paste a raw ToS as a wall of text - that requires clause
+   segmentation, which is not built (see roadmap). The scoring gap is closed;
+   the segmentation gap is the remaining barrier between "score my clauses" and
+   "score my contract".
 
 2. **Single-annotator community dataset.** `CodeHima/TOS_Dataset` (MIT licensed)
    is conveniently shaped but carries one annotator's judgement and is not the
@@ -54,30 +57,49 @@ judgment. It is not yet a tool a stranger can point at their own contract.
 
 ## Roadmap (where it is going, in order)
 
-### Next: bring-your-own-ToS inference
+### Next: raw-document segmentation (the inference path is now shipped)
 
-This is the gap that turns the artifact into a tool. It is two pieces of work,
-and only one of them is small.
+The inference path - the small piece - is built and committed.
 
-- **The small piece - the inference path.** Load a cached trained model, run the
-  existing pipeline's scoring on new unlabelled text, apply the existing
-  threshold, write the same clause report minus the ground-truth columns
-  (true_label, outcome, severity) because there is no answer key for text the
-  model has never seen. The output for a user's own document is: clause, flagged,
-  risk_score, why_flagged. Roughly 60 lines reusing what already exists.
+- **The small piece - the inference path (shipped).** `scripts/train_and_save.py`
+  fits the Lap-1 pipeline on cleaned data, derives the committed recall-first
+  threshold on validation, and freezes both to `models/` as one unit (the model
+  and its operating point cannot drift apart). `scripts/infer.py` loads that
+  frozen model, scores an already-split clause list (one per line, from a file or
+  piped stdin), applies the committed threshold, and writes the clause report
+  minus the ground-truth columns (`true_label`, `outcome`, `severity`) because
+  unseen text has no answer key. Output: `clause`, `flagged`, `risk_score`,
+  `why_flagged`, as CSV and colour-coded XLSX. It reuses the existing
+  `build_pipeline` and the exact `why_flagged` logic by import, not
+  reimplementation, so it cannot diverge from the trained artifact.
 
-- **The hard piece - clause segmentation.** The dataset hands clauses pre-split,
-  one per row. A real ToS is a wall of text. Cutting it into clauses is a genuine
-  problem: naive splitting on periods breaks on "Inc.", "e.g.", section numbers,
-  and nested sub-clauses; splitting on newlines depends on how the text was
-  copy-pasted. It will not be perfect, and the segmentation quality bounds the
-  whole tool's usefulness more than the model does. This is named here rather
-  than quietly shipped because a half-working "paste your ToS" feature that
-  segments badly is worse than not having one.
+- **The hard piece - clause segmentation (not built).** The dataset hands clauses
+  pre-split, one per row. A real ToS is a wall of text. Cutting it into clauses is
+  a genuine problem: naive splitting on periods breaks on "Inc.", "e.g.", section
+  numbers, and nested sub-clauses; splitting on newlines depends on how the text
+  was copy-pasted. It will not be perfect, and the segmentation quality bounds the
+  whole tool's usefulness more than the model does. This is named here rather than
+  quietly shipped because a half-working "paste your ToS" feature that segments
+  badly is worse than not having one. The shipped inference path sidesteps it by
+  accepting a pre-split list - about 80% of the utility for 20% of the work.
+  Raw-document segmentation is the follow-on.
 
-  A first version sidesteps this by accepting an already-split clause list (one
-  per line) - about 80% of the utility for 20% of the work. Raw-document
-  segmentation is the harder follow-on.
+### Then: the LLM depth stage (two-stage architecture)
+
+The shipped classifier is the *breadth* stage - wide, cheap, reproducible,
+deterministic. The natural follow-on is a *depth* stage: an LLM judge applied
+only to the small subset the classifier surfaces, giving explanation and
+catching the cumulative-scope cases a bag-of-words model structurally cannot see
+(a licence unfair by "perpetual, irrevocable, worldwide" pileup, no single scary
+token). The design decision is the triage rule, and it is deliberately *not*
+"send the extremes" - the extremes are where the cheap model is already right.
+Route the union of two cheap signals (score near the threshold; a
+length/complexity flag or a Lap-1-vs-Lap-2 disagreement) to the LLM, and keep an
+agreement column so a human sorts by where the two stages disagreed. The
+principled version derives the uncertain band by measuring per-score-bin
+classifier reliability on a holdout rather than guessing it. This is the
+composition - ML + deterministic logic + system design - that the project is
+meant to demonstrate.
 
 ### Then: validation and ranking quality
 
@@ -109,8 +131,9 @@ and only one of them is small.
 | Error analysis of the model's own misses | Shipped |
 | Structural non-clause cleaning (~18% of rows) | Shipped (`drop_nonclauses`) |
 | Legal-BERT semantic-recovery comparison | Shipped (32% recovery; trades recall for precision) |
-| Score a user's own pasted ToS | Not built (next step) |
+| Score a user's own pasted clauses (pre-split) | Shipped (`infer.py` + `train_and_save.py`) |
 | Clause segmentation of raw documents | Not built (the hard part) |
+| Two-stage classifier + LLM depth pass | Not built (next architecture lap) |
 | LexGLUE cross-check | Shipped (0.895 recall held-out) |
 | Calibrated severity ranking | Not built |
 | Deployed service (API + Docker) | Not built (Lap 3) |
